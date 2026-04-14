@@ -13,7 +13,7 @@
   import {
     getFirestore, collection, doc, getDoc, getDocs, setDoc,
     updateDoc, addDoc, deleteDoc, query, orderBy, serverTimestamp,
-    runTransaction, where, limit
+    runTransaction
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   /* ══════════════════════════════════════
@@ -33,11 +33,6 @@
 
   const app = initializeApp(firebaseConfig);
   const db  = getFirestore(app);
-
-  /* ── Función de escape para prevenir XSS ── */
-  function escapeHtml(unsafe) {
-    return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
 
   /* ── Estado global ── */
   let currentUser = null;
@@ -203,30 +198,15 @@
     $("navUser").textContent=s.nombre+" · "+s.grado+"° "+s.seccion+" · Ciclo "+s.ciclo;
     $("stu-pts-total").textContent=s.pts;
     $("stu-ciclo-badge").textContent="Ciclo "+s.ciclo+" — "+(s.ciclo==="VI"?"1ro y 2do de Secundaria":"3ro, 4to y 5to de Secundaria");
-    
-    // Obtener acumulado del bimestre actual desde khanWeeks
-    const bim = bimestreActual();
-    const weeksSnap = await getDocs(query(
-      collection(db,"students",currentUser.id,"khanWeeks"),
-      where("bimestre","==",bim)
-    ));
-    let totalMin = 0, totalEjer = 0;
-    weeksSnap.forEach(doc => {
-      const d = doc.data();
-      totalMin += d.minutos || 0;
-      totalEjer += d.ejercicios || 0;
-    });
-    // También sumar lo actual no guardado aún (khanData)
-    const k = s.khanData || {};
-    totalMin += k.minutos || 0;
-    totalEjer += k.ejerciciosAprobados || 0;
-
-    $("prog-min").style.width=Math.min(100,(totalMin/120)*100)+"%";
-    $("prog-min-lbl").textContent=totalMin+" min (bimestre)";
-    $("p-min-txt").textContent=totalMin+" min";
-    $("prog-ej").style.width=Math.min(100,(totalEjer/4)*100)+"%";
-    $("prog-ej-lbl").textContent=totalEjer+" ejercicios";
-    $("p-ej-txt").textContent=totalEjer+" ejercicios";
+    const k=s.khanData||{};
+    const min=k.minutos||0;
+    const ej=k.ejerciciosAprobados||0;
+    $("prog-min").style.width=Math.min(100,(min/120)*100)+"%";
+    $("prog-min-lbl").textContent=min+" min esta semana";
+    $("p-min-txt").textContent=min+"/120 min";
+    $("prog-ej").style.width=Math.min(100,(ej/4)*100)+"%";
+    $("prog-ej-lbl").textContent=ej+"/4 ejercicios ≥80%";
+    $("p-ej-txt").textContent=ej+"/4";
   }
 
   window.setStuTab = async tab => {
@@ -256,8 +236,8 @@
     c.innerHTML=allItems.map(item=>{
       const ok=s.pts>=item.pts&&item.stock>0;
       return `<div class="item-card ${ok?"can-afford":""}">
-        <div class="item-emoji">${escapeHtml(item.emoji||"🎁")}</div>
-        <div class="item-name">${escapeHtml(item.name)}</div>
+        <div class="item-emoji">${item.emoji||"🎁"}</div>
+        <div class="item-name">${item.name}</div>
         <div class="item-pts">${item.pts} pts</div>
         <div class="item-stock">${item.stock>98?"∞":item.stock} disponibles</div>
         <button class="btn-canjear" ${!ok?"disabled":""} onclick="abrirCanje('${item.id}')">
@@ -268,21 +248,16 @@
   }
 
   async function renderRanking(){
-    const cicloU = currentUser.ciclo;
-    const q = query(
-      collection(db,"students"),
-      where("ciclo","==",cicloU),
-      orderBy("pts","desc"),
-      limit(50)
-    );
-    const snap = await getDocs(q);
-    const mismo = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const snap=await getDocs(collection(db,"students"));
+    const cicloU=currentUser.ciclo;
+    const mismo=snap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(s=>s.ciclo===cicloU).sort((a,b)=>b.pts-a.pts);
     const c=$("ranking-container");
     if(!mismo.length){c.innerHTML='<p class="empty">Sin estudiantes en tu ciclo aún</p>';return;}
     c.innerHTML=`
       <div class="ranking-header">
         <span class="rank-ciclo-badge">Ciclo ${cicloU}</span>
-        <span class="rank-count">Top 50 de ${mismo.length} estudiantes</span>
+        <span class="rank-count">${mismo.length} estudiantes</span>
       </div>
       ${mismo.map((s,i)=>{
         const isMe=s.id===currentUser.id;
@@ -290,8 +265,8 @@
         return `<div class="rank-row ${isMe?"rank-me":""}">
           <div class="rank-pos">${medal||"#"+(i+1)}</div>
           <div class="rank-info">
-            <div class="rank-name">${escapeHtml(s.nombre)}${isMe?' <span class="rank-you">(tú)</span>':""}</div>
-            <div class="rank-detail">${escapeHtml(s.grado)}° ${escapeHtml(s.seccion)}</div>
+            <div class="rank-name">${s.nombre}${isMe?' <span class="rank-you">(tú)</span>':""}</div>
+            <div class="rank-detail">${s.grado}° ${s.seccion}</div>
           </div>
           <div class="rank-pts">${s.pts} pts</div>
         </div>`;
@@ -306,7 +281,7 @@
     c.innerHTML=snap.docs.map(d=>{
       const h=d.data();
       return `<div class="hist-item">
-        <div><div class="hist-name">${escapeHtml(h.desc)}</div><div class="hist-date">${fmt(h.fecha)}</div></div>
+        <div><div class="hist-name">${h.desc}</div><div class="hist-date">${fmt(h.fecha)}</div></div>
         <div class="hist-pts ${h.pts>0?"positive":"negative"}">${h.pts>0?"+":""}${h.pts} pts</div>
       </div>`;
     }).join("");
@@ -314,32 +289,18 @@
 
   window.abrirCanje = id => {
     canjeTarget=allItems.find(i=>i.id===id); if(!canjeTarget)return;
-    $("modal-title").textContent="Canjear: "+escapeHtml(canjeTarget.name)+" "+(escapeHtml(canjeTarget.emoji||""));
+    $("modal-title").textContent="Canjear: "+canjeTarget.name+" "+(canjeTarget.emoji||"");
     $("modal-body").textContent="Se descontarán "+canjeTarget.pts+" puntos de tu cuenta. ¿Confirmas?";
     $("modalCanje").classList.add("open");
   };
   window.closeModal=()=>{$("modalCanje").classList.remove("open");canjeTarget=null;};
 
-  /* Canje con transacción Firestore y verificación bimestral */
+  /* Canje con transacción Firestore para evitar race conditions en el stock */
   window.confirmarCanje = async () => {
     if(!canjeTarget)return;
     if(!storeStatus.open){closeModal();return alert("La tienda está cerrada en este momento.");}
     const s=currentUser;
     if(s.pts<canjeTarget.pts){closeModal();return;}
-
-    // Verificar si ya canjeó este bimestre (opcional, según reglas)
-    const bim = bimestreActual();
-    const canjesSnap = await getDocs(query(
-      collection(db,"canjes"),
-      where("userId","==",s.id),
-      where("bimestre","==",bim)
-    ));
-    if(!canjesSnap.empty){
-      closeModal();
-      alert("Ya has realizado un canje este bimestre. Solo se permite uno por bimestre.");
-      return;
-    }
-
     try {
       await runTransaction(db, async (tx) => {
         const stuRef  = doc(db,"students",s.id);
@@ -355,7 +316,7 @@
         tx.update(stuRef,{pts: stuData.pts - itemData.pts});
         if(itemData.stock < 99) tx.update(itemRef,{stock: itemData.stock - 1});
       });
-      /* Registrar historial y canje */
+      /* Registrar historial fuera de la transacción */
       await addDoc(collection(db,"students",s.id,"history"),{
         desc:"Canje: "+canjeTarget.name, pts:-canjeTarget.pts,
         fecha:serverTimestamp(), tipo:"canje"
@@ -363,7 +324,7 @@
       await addDoc(collection(db,"canjes"),{
         userId:s.id, nombre:s.nombre, grado:s.grado, seccion:s.seccion, ciclo:s.ciclo,
         item:canjeTarget.name, emoji:canjeTarget.emoji||"🎁", pts:canjeTarget.pts,
-        fecha:serverTimestamp(), bimestre:bim
+        fecha:serverTimestamp(), bimestre:bimestreActual()
       });
       closeModal();
       await refreshStudent();
@@ -416,20 +377,19 @@
   };
 
   async function adminEstudiantes(){
-    // Leer solo los primeros 200 por ciclo para evitar sobrecarga (paginación opcional)
-    const snapVI = await getDocs(query(collection(db,"students"), where("ciclo","==","VI"), orderBy("grado"), orderBy("seccion"), orderBy("nombre"), limit(200)));
-    const snapVII = await getDocs(query(collection(db,"students"), where("ciclo","==","VII"), orderBy("grado"), orderBy("seccion"), orderBy("nombre"), limit(200)));
-    const vi = snapVI.docs.map(d=>({id:d.id,...d.data()}));
-    const vii = snapVII.docs.map(d=>({id:d.id,...d.data()}));
-    
+    const snap=await getDocs(collection(db,"students"));
+    const all=snap.docs.map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>a.grado.localeCompare(b.grado)||a.seccion.localeCompare(b.seccion)||a.nombre.localeCompare(b.nombre));
+    const vi=all.filter(s=>s.ciclo==="VI");
+    const vii=all.filter(s=>s.ciclo==="VII");
     const filas=lista=>lista.length?lista.map(s=>`<tr>
-        <td><code class="code-chip">${escapeHtml(s.username||s.id)}</code></td>
-        <td>${escapeHtml(s.nombre)}</td>
-        <td>${escapeHtml(s.grado)}° ${escapeHtml(s.seccion)}</td>
+        <td><code class="code-chip">${s.username||s.id}</code></td>
+        <td>${s.nombre}</td>
+        <td>${s.grado}° ${s.seccion}</td>
         <td><strong>${s.pts}</strong></td>
         <td>
-          <button class="btn-pts" onclick="abrirPtsModal('${s.id}','${escapeHtml(s.nombre).replace(/'/g,"\\'")}')">+ Puntos</button>
-          <button class="btn-danger" onclick="eliminarEst('${s.id}','${escapeHtml(s.nombre).replace(/'/g,"\\'")}')">Eliminar</button>
+          <button class="btn-pts" onclick="abrirPtsModal('${s.id}','${s.nombre.replace(/'/g,"\\'")}')">+ Puntos</button>
+          <button class="btn-danger" onclick="eliminarEst('${s.id}','${s.nombre.replace(/'/g,"\\'")}')">Eliminar</button>
         </td>
       </tr>`).join("")
       :'<tr><td colspan="5" class="empty-td">Sin estudiantes registrados</td></tr>';
@@ -446,10 +406,10 @@
   };
 
   async function adminKhan(){
-    const snap=await getDocs(query(collection(db,"students"), orderBy("nombre"), limit(300)));
+    const snap=await getDocs(collection(db,"students"));
     const all=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.nombre.localeCompare(b.nombre));
     $("khan-student").innerHTML=all.length
-      ?all.map(s=>`<option value="${s.id}">${escapeHtml(s.nombre)} — ${escapeHtml(s.grado)}° ${escapeHtml(s.seccion)} (Ciclo ${escapeHtml(s.ciclo)})</option>`).join("")
+      ?all.map(s=>`<option value="${s.id}">${s.nombre} — ${s.grado}° ${s.seccion} (Ciclo ${s.ciclo})</option>`).join("")
       :"<option>Sin estudiantes</option>";
     $("khan-preview").style.display="none"; khanPts=0;
   }
@@ -476,21 +436,10 @@
     const snap=await getDoc(doc(db,"students",userId));
     if(!snap.exists())return alert("Estudiante no encontrado.");
     const s=snap.data();
-    const bim = bimestreActual();
-    
-    // Actualizar puntos totales y khanData (acumulado semanal actual)
-    const currentKhan = s.khanData || {minutos:0,ejerciciosAprobados:0};
     await updateDoc(doc(db,"students",userId),{
       pts:(s.pts||0)+khanPts,
-      khanData:{minutos:currentKhan.minutos+min, ejerciciosAprobados:currentKhan.ejerciciosAprobados+ej}
+      khanData:{minutos:min,ejerciciosAprobados:ej}
     });
-    
-    // Guardar registro semanal en subcolección khanWeeks (para historial bimestral)
-    await addDoc(collection(db,"students",userId,"khanWeeks"),{
-      semana, minutos:min, ejercicios:ej, puntosOtorgados:khanPts,
-      fecha:serverTimestamp(), bimestre:bim
-    });
-    
     await addDoc(collection(db,"students",userId,"history"),{
       desc:"Khan Academy ("+semana+"): "+min+" min, "+ej+"/4 ejercicios ≥80%",
       pts:khanPts, fecha:serverTimestamp(), tipo:"khan"
@@ -506,7 +455,7 @@
     allItems=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.pts-b.pts);
     $("tbody-premios").innerHTML=allItems.length
       ?allItems.map(item=>`<tr>
-          <td>${escapeHtml(item.emoji||"🎁")} ${escapeHtml(item.name)}</td>
+          <td>${item.emoji||"🎁"} ${item.name}</td>
           <td>${item.pts}</td>
           <td>${item.stock>98?"∞":item.stock}</td>
           <td><button class="btn-danger" onclick="eliminarPremio('${item.id}')">Eliminar</button></td>
@@ -531,17 +480,17 @@
   };
 
   async function adminCanjes(){
-    const q=query(collection(db,"canjes"),orderBy("fecha","desc"),limit(200));
+    const q=query(collection(db,"canjes"),orderBy("fecha","desc"));
     const snap=await getDocs(q);
     $("tbody-canjes").innerHTML=snap.empty
       ?'<tr><td colspan="6" class="empty-td">Sin canjes registrados</td></tr>'
       :snap.docs.map(d=>{
           const c=d.data();
           return `<tr>
-            <td>${escapeHtml(c.nombre)}</td>
-            <td>${escapeHtml(c.grado)}° ${escapeHtml(c.seccion)}</td>
-            <td><span class="badge ${c.ciclo==="VI"?"badge-vi":"badge-vii"}">Ciclo ${escapeHtml(c.ciclo)}</span></td>
-            <td>${escapeHtml(c.emoji||"🎁")} ${escapeHtml(c.item)}</td>
+            <td>${c.nombre}</td>
+            <td>${c.grado}° ${c.seccion}</td>
+            <td><span class="badge ${c.ciclo==="VI"?"badge-vi":"badge-vii"}">Ciclo ${c.ciclo}</span></td>
+            <td>${c.emoji||"🎁"} ${c.item}</td>
             <td>${c.pts}</td>
             <td>${fmt(c.fecha)}</td>
           </tr>`;
@@ -571,7 +520,6 @@
 </script>
 
 <style>
-  /* (Todo el CSS se mantiene igual, no se modifica por brevedad) */
   /* ── Reset & Base ── */
   *, *::before, *::after { box-sizing:border-box; margin:0; padding:0 }
   body {
@@ -1120,9 +1068,365 @@
 </head>
 <body>
 
-<!-- El HTML se mantiene idéntico al original, solo se han modificado los scripts y se ha añadido escapeHtml -->
-<!-- Por brevedad no se replica todo el HTML aquí, es el mismo que en el archivo original -->
-<!-- ... (copiar el resto del HTML exactamente igual) ... -->
+<!-- ════ LOGIN ════ -->
+<div id="loginScreen" class="screen active">
+  <div class="login-inst-header">
+    <div class="logo-wrap">
+      <img src="logo.jpeg" alt="Logo IE 0148" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <span class="logo-fallback" style="display:none">🏫</span>
+    </div>
+    <div>
+      <div class="school-sub">Institución Educativa N° 0148</div>
+      <div class="school-name">MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE</div>
+      <div class="school-tag">San Juan de Lurigancho · Lima</div>
+    </div>
+  </div>
+
+  <div class="login-body">
+    <div class="login-wrap">
+      <div class="login-badge">
+        <div class="badge-icon">🛒</div>
+        <h2>La Tiendita AIP</h2>
+        <p>Sistema de puntos Khan Academy · Secundaria CNEB</p>
+      </div>
+      <div class="card">
+        <div class="tabs-login">
+          <button class="tab-btn active" onclick="setLoginTab('student')">Soy Estudiante</button>
+          <button class="tab-btn" onclick="setLoginTab('admin')">Administrador</button>
+        </div>
+        <div id="msgLogin" class="msg"></div>
+        <div id="loginStudent">
+          <div id="registerForm" style="display:none">
+            <div class="form-group">
+              <label>Nombre de usuario único (sin espacios)</label>
+              <input id="regUser" type="text" placeholder="ej: juan_perez o jperez_2vi" autocomplete="off"/>
+            </div>
+            <div class="form-group">
+              <label>Contraseña (mínimo 4 caracteres)</label>
+              <input id="regPass" type="password" placeholder="••••"/>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Grado</label>
+                <select id="regGrado">
+                  <option value="1ro">1ro — Ciclo VI</option>
+                  <option value="2do">2do — Ciclo VI</option>
+                  <option value="3ro">3ro — Ciclo VII</option>
+                  <option value="4to">4to — Ciclo VII</option>
+                  <option value="5to">5to — Ciclo VII</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Sección</label>
+                <select id="regSeccion">
+                  <option>A</option><option>B</option><option>C</option>
+                  <option>D</option><option>E</option><option>F</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Nombres y apellidos completos</label>
+              <input id="regNombre" type="text" placeholder="Escribe tu nombre real"/>
+            </div>
+            <button class="btn-primary" onclick="registrar()">Crear mi cuenta</button>
+            <p class="link-small">¿Ya tienes cuenta? <a onclick="toggleRegister(false)">Iniciar sesión</a></p>
+          </div>
+          <div id="loginForm">
+            <div class="form-group">
+              <label>Nombre de usuario</label>
+              <input id="loginUser" type="text" placeholder="Tu usuario" autocomplete="off"/>
+            </div>
+            <div class="form-group">
+              <label>Contraseña</label>
+              <input id="loginPass" type="password" placeholder="••••"/>
+            </div>
+            <button class="btn-primary" onclick="loginStudent()">Entrar a la Tiendita</button>
+            <p class="link-small">¿Primera vez? <a onclick="toggleRegister(true)">Crear cuenta aquí</a></p>
+          </div>
+        </div>
+        <div id="loginAdmin" style="display:none">
+          <div class="form-group">
+            <label>Contraseña de administrador</label>
+            <input id="adminPass" type="password" placeholder="Contraseña admin"/>
+          </div>
+          <button class="btn-primary" onclick="loginAdmin()">Acceder como Administrador</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ ESTUDIANTE ════ -->
+<div id="studentScreen" class="screen">
+  <div class="inst-header">
+    <div class="logo-wrap">
+      <img src="logo.jpeg" alt="Logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <span class="logo-fallback" style="display:none">🏫</span>
+    </div>
+    <div class="school-info">
+      <div class="school-sub">IE N° 0148</div>
+      <div class="school-name">MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE</div>
+      <div class="school-tag">La Tiendita AIP · Sistema de Puntos</div>
+    </div>
+  </div>
+  <div class="app-nav">
+    <span style="font-size:13px;font-weight:700">🛒 Tiendita AIP</span>
+    <div class="nav-right">
+      <span class="nav-user" id="navUser"></span>
+      <span class="nav-pts" id="navPts">0 pts</span>
+      <button class="btn-logout" onclick="logout()">Salir</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="stu-tabs">
+      <button class="stu-tab active" onclick="setStuTab('inicio')">📊 Inicio</button>
+      <button class="stu-tab" onclick="setStuTab('tienda')">🛍️ Tienda</button>
+      <button class="stu-tab" onclick="setStuTab('ranking')">🏆 Ranking</button>
+      <button class="stu-tab" onclick="setStuTab('historial')">📋 Historial</button>
+    </div>
+
+    <div id="stu-inicio" class="stu-panel active">
+      <div class="ciclo-banner">
+        <span style="font-size:18px">🎓</span>
+        <span id="stu-ciclo-badge">Ciclo VI</span>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card gold">
+          <div class="stat-val" id="stu-pts-total">0</div>
+          <div class="stat-lbl">Puntos disponibles</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="prog-min-lbl" style="font-size:16px;padding-top:4px">0 min</div>
+          <div class="stat-lbl">Minutos esta semana</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="prog-ej-lbl" style="font-size:18px;padding-top:4px">0/4</div>
+          <div class="stat-lbl">Ejercicios ≥80%</div>
+        </div>
+      </div>
+      <div class="section-card">
+        <h3>Mi progreso semanal en Khan Academy</h3>
+        <div class="prog-row">
+          <div class="prog-label">
+            <span>Minutos activos (meta: 120 min)</span>
+            <span id="p-min-txt">0/120 min</span>
+          </div>
+          <div class="prog-bar"><div class="prog-fill blue" id="prog-min" style="width:0%"></div></div>
+        </div>
+        <div class="prog-row">
+          <div class="prog-label">
+            <span>Ejercicios aprobados con ≥80%</span>
+            <span id="p-ej-txt">0/4</span>
+          </div>
+          <div class="prog-bar"><div class="prog-fill amber" id="prog-ej" style="width:0%"></div></div>
+        </div>
+      </div>
+      <div class="pts-guide">
+        <h3>¿Cómo gano puntos cada semana?</h3>
+        <div class="guide-row"><span>Por cada 10 minutos en Khan Academy</span><span>+5 pts</span></div>
+        <div class="guide-row"><span>120 min en la semana = 12 bloques</span><span>+60 pts</span></div>
+        <div class="guide-row"><span>Por cada ejercicio resuelto con ≥80%</span><span>+5 pts</span></div>
+        <div class="guide-row"><span>Bonus: los 4 ejercicios ≥80% (todos completos)</span><span>+10 pts extra</span></div>
+        <div class="guide-row"><span>Máximo posible por semana</span><span>90 pts</span></div>
+        <div class="guide-row"><span>Canje: el profe abre la tienda al final del bimestre</span><span>🔓 1 vez/bimestre</span></div>
+      </div>
+    </div>
+
+    <div id="stu-tienda" class="stu-panel">
+      <div id="store-banner"></div>
+      <div id="items-container" class="items-grid"></div>
+    </div>
+
+    <div id="stu-ranking" class="stu-panel">
+      <div id="ranking-container"></div>
+    </div>
+
+    <div id="stu-historial" class="stu-panel">
+      <div id="historial-container" class="hist-list"></div>
+    </div>
+  </div>
+  <div class="app-footer">IE N° 0148 MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE · AIP · Sistema Tiendita</div>
+</div>
+
+<!-- ════ ADMIN ════ -->
+<div id="adminScreen" class="screen">
+  <div class="inst-header">
+    <div class="logo-wrap">
+      <img src="logo.jpeg" alt="Logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <span class="logo-fallback" style="display:none">🏫</span>
+    </div>
+    <div class="school-info">
+      <div class="school-sub">IE N° 0148</div>
+      <div class="school-name">MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE</div>
+      <div class="school-tag">Panel de Administración · AIP</div>
+    </div>
+  </div>
+  <div class="app-nav purple">
+    <span style="font-size:13px;font-weight:700">⚙️ Administrador AIP 0148</span>
+    <div class="nav-right">
+      <button class="btn-logout" onclick="logout()">Salir</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="store-control">
+      <div class="store-control-info">
+        <h3>Control de la Tiendita bimestral</h3>
+        <div id="store-status-lbl"><span class="status-closed">● CERRADA</span></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">
+          Abre al final del bimestre · Cierra cuando todos hayan canjeado
+        </div>
+      </div>
+      <button class="btn-store success" id="btn-store-toggle" onclick="toggleStore()">
+        🔓 Abrir tienda del bimestre
+      </button>
+    </div>
+    <div class="admin-tabs">
+      <button class="admin-tab active" onclick="setAdminTab('estudiantes')">👨‍🎓 Estudiantes</button>
+      <button class="admin-tab" onclick="setAdminTab('khan')">📚 Khan Academy</button>
+      <button class="admin-tab" onclick="setAdminTab('premios')">🎁 Premios</button>
+      <button class="admin-tab" onclick="setAdminTab('canjes')">📋 Canjes</button>
+    </div>
+
+    <!-- TAB: Estudiantes -->
+    <div id="admin-estudiantes" class="admin-panel active">
+      <div class="ciclo-section">
+        <div class="ciclo-section-title">
+          <span class="badge-vi">Ciclo VI</span>
+          <h4>1ro y 2do de Secundaria</h4>
+          <span class="count-lbl" id="count-vi"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Nombre completo</th><th>Grado / Sección</th><th>Puntos</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-vi"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ciclo-section">
+        <div class="ciclo-section-title">
+          <span class="badge-vii">Ciclo VII</span>
+          <h4>3ro, 4to y 5to de Secundaria</h4>
+          <span class="count-lbl" id="count-vii"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Nombre completo</th><th>Grado / Sección</th><th>Puntos</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-vii"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Khan Academy -->
+    <div id="admin-khan" class="admin-panel">
+      <div class="admin-guide">
+        <h3>📊 Tabla de puntos semanal — Khan Academy</h3>
+        <div class="guide-row"><span>Por cada 10 minutos activos en Khan Academy</span><span>+5 pts</span></div>
+        <div class="guide-row"><span>Por cada ejercicio individual con ≥80% correcto</span><span>+5 pts</span></div>
+        <div class="guide-row"><span>Bonus: los 4 ejercicios aprobados (todos ≥80%)</span><span>+10 pts</span></div>
+        <div class="guide-row"><span>Máximo semanal (120 min + 4 ejerc. + bonus)</span><span>90 pts</span></div>
+        <div class="guide-row"><span>Ejemplo: 100 min + 4 ejerc. ≥80%</span><span>50 + 20 + 10 = 80 pts</span></div>
+        <div class="guide-row"><span>Ejemplo: 120 min + 3 ejerc. ≥80%</span><span>60 + 15 = 75 pts</span></div>
+      </div>
+      <div class="khan-form">
+        <h3>Registrar puntos semanales de un estudiante</h3>
+        <div class="form-group">
+          <label>Estudiante</label>
+          <select id="khan-student"></select>
+        </div>
+        <div class="form-group">
+          <label>Referencia de semana</label>
+          <input id="khan-semana" type="text" placeholder="ej: Semana 1 — Abril 2025"/>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Minutos en Khan Academy</label>
+            <input id="khan-minutos" type="number" min="0" placeholder="ej: 120"/>
+          </div>
+          <div class="form-group">
+            <label>Ejercicios con ≥80% (0 a 4)</label>
+            <input id="khan-ejercicios" type="number" min="0" max="4" placeholder="ej: 4"/>
+          </div>
+        </div>
+        <div class="khan-preview" id="khan-preview">
+          <div id="khan-desglose"></div>
+        </div>
+        <button class="btn-calc" onclick="calcularKhan()" style="margin-right:8px">Calcular puntos</button>
+        <button class="btn-add" onclick="asignarKhan()">Asignar puntos</button>
+      </div>
+    </div>
+
+    <!-- TAB: Premios -->
+    <div id="admin-premios" class="admin-panel">
+      <p class="section-title">Premios de la tienda</p>
+      <div class="premio-form">
+        <p>Agregar nuevo premio</p>
+        <div class="form-row">
+          <div class="form-group"><label>Nombre del premio</label><input id="premio-nombre" type="text" placeholder="ej: Lápices de colores x12"/></div>
+          <div class="form-group"><label>Emoji</label><input id="premio-emoji" type="text" placeholder="🎨" maxlength="2"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Puntos requeridos</label><input id="premio-puntos" type="number" min="1" placeholder="ej: 80"/></div>
+          <div class="form-group"><label>Stock (99 = ilimitado)</label><input id="premio-stock" type="number" min="0" placeholder="ej: 10"/></div>
+        </div>
+        <button class="btn-add" onclick="agregarPremio()">Agregar premio</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Premio</th><th>Puntos</th><th>Stock</th><th>Acción</th></tr></thead>
+          <tbody id="tbody-premios"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB: Canjes -->
+    <div id="admin-canjes" class="admin-panel">
+      <p class="section-title">Historial de canjes realizados</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Estudiante</th><th>Grado/Secc.</th><th>Ciclo</th><th>Premio</th><th>Puntos</th><th>Fecha</th></tr></thead>
+          <tbody id="tbody-canjes"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="app-footer">IE N° 0148 MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE · Panel de Administración</div>
+</div>
+
+<!-- MODAL CANJE -->
+<div class="modal-bg" id="modalCanje">
+  <div class="modal">
+    <h3 id="modal-title">Confirmar canje</h3>
+    <p id="modal-body" style="font-size:13px;color:var(--muted)"></p>
+    <p style="font-size:12px;color:#aaa;margin-top:6px">Los canjes son definitivos y no se pueden revertir.</p>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-confirm" onclick="confirmarCanje()">Sí, canjear</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PUNTOS EXTRA -->
+<div class="modal-bg" id="modalPts">
+  <div class="modal">
+    <h3>Agregar puntos extra</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      Estudiante: <strong id="modal-pts-user"></strong>
+    </p>
+    <div class="form-group">
+      <label>Cantidad de puntos</label>
+      <input id="modal-pts-val" type="number" min="1" placeholder="ej: 10"/>
+    </div>
+    <div class="form-group">
+      <label>Motivo</label>
+      <input id="modal-pts-motivo" type="text" placeholder="ej: Participación, tarea extra, comportamiento..."/>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closePtsModal()">Cancelar</button>
+      <button class="btn-confirm" onclick="confirmarPts()">Agregar puntos</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
