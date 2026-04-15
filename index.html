@@ -40,7 +40,8 @@
   let allItems    = [];
   let storeStatus = { open:false, bimestre:"" };
   let canjeTarget = null;
-  let ptsTarget   = null;
+  let ptsTarget   = null;      // Para agregar puntos
+  let quitarPtsTarget = null;  // NUEVO: Para quitar puntos
   let khanPts     = 0;
 
   const $   = id => document.getElementById(id);
@@ -367,13 +368,14 @@
 
   window.setAdminTab = tab => {
     document.querySelectorAll(".admin-tab").forEach((b,i)=>
-      b.classList.toggle("active",["estudiantes","khan","premios","canjes"][i]===tab));
+      b.classList.toggle("active",["estudiantes","khan","premios","canjes","ranking"][i]===tab)); // NUEVO: agregado "ranking"
     document.querySelectorAll(".admin-panel").forEach(p=>p.classList.remove("active"));
     $("admin-"+tab).classList.add("active");
     if(tab==="estudiantes") adminEstudiantes();
     if(tab==="khan")        adminKhan();
     if(tab==="premios")     adminPremios();
     if(tab==="canjes")      adminCanjes();
+    if(tab==="ranking")     adminRanking(); // NUEVO
   };
 
   async function adminEstudiantes(){
@@ -389,6 +391,8 @@
         <td><strong>${s.pts}</strong></td>
         <td>
           <button class="btn-pts" onclick="abrirPtsModal('${s.id}','${s.nombre.replace(/'/g,"\\'")}')">+ Puntos</button>
+          <!-- NUEVO: Botón para quitar puntos -->
+          <button class="btn-quitar" onclick="abrirQuitarPtsModal('${s.id}','${s.nombre.replace(/'/g,"\\'")}')">– Puntos</button>
           <button class="btn-danger" onclick="eliminarEst('${s.id}','${s.nombre.replace(/'/g,"\\'")}')">Eliminar</button>
         </td>
       </tr>`).join("")
@@ -402,6 +406,41 @@
   window.eliminarEst = async (id,nombre) => {
     if(!confirm("¿Eliminar a "+nombre+"? No se puede deshacer."))return;
     await deleteDoc(doc(db,"students",id));
+    adminEstudiantes();
+  };
+
+  // NUEVO: Función para abrir modal de quitar puntos
+  window.abrirQuitarPtsModal = (id, nombre) => {
+    quitarPtsTarget = { id, nombre };
+    $("modal-quitar-pts-user").textContent = nombre;
+    $("modal-quitar-pts-val").value = "";
+    $("modal-quitar-pts-motivo").value = "";
+    $("modalQuitarPts").classList.add("open");
+  };
+
+  window.closeQuitarPtsModal = () => {
+    $("modalQuitarPts").classList.remove("open");
+    quitarPtsTarget = null;
+  };
+
+  window.confirmarQuitarPts = async () => {
+    const val = parseInt($("modal-quitar-pts-val").value) || 0;
+    const motivo = $("modal-quitar-pts-motivo").value.trim() || "Ajuste de puntos";
+    if (val <= 0) return alert("Ingresa un valor mayor a 0.");
+    const snap = await getDoc(doc(db, "students", quitarPtsTarget.id));
+    const s = snap.data();
+    const ptsActuales = s.pts || 0;
+    if (val > ptsActuales) {
+      if (!confirm(`El estudiante solo tiene ${ptsActuales} pts. ¿Deseas restar ${ptsActuales} pts y dejarlo en 0?`)) {
+        return;
+      }
+    }
+    const ptsARestar = Math.min(val, ptsActuales); // no permite negativos
+    await updateDoc(doc(db, "students", quitarPtsTarget.id), { pts: ptsActuales - ptsARestar });
+    await addDoc(collection(db, "students", quitarPtsTarget.id, "history"), {
+      desc: `Quitar puntos: ${motivo}`, pts: -ptsARestar, fecha: serverTimestamp(), tipo: "ajuste"
+    });
+    closeQuitarPtsModal();
     adminEstudiantes();
   };
 
@@ -495,6 +534,55 @@
             <td>${fmt(c.fecha)}</td>
           </tr>`;
         }).join("");
+  }
+
+  // NUEVO: Función para mostrar ranking en panel admin
+  async function adminRanking() {
+    const snap = await getDocs(collection(db, "students"));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const cicloVI = all.filter(s => s.ciclo === "VI").sort((a, b) => b.pts - a.pts);
+    const cicloVII = all.filter(s => s.ciclo === "VII").sort((a, b) => b.pts - a.pts);
+
+    const renderTablaRanking = (lista, ciclo) => {
+      if (!lista.length) return '<p class="empty">Sin estudiantes en este ciclo</p>';
+      return `
+        <div class="table-wrap" style="margin-bottom:2rem;">
+          <table>
+            <thead><tr><th>Pos.</th><th>Estudiante</th><th>Grado/Sección</th><th>Puntos</th></tr></thead>
+            <tbody>
+              ${lista.map((s, i) => {
+                const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i+1}`;
+                return `<tr>
+                  <td>${medal}</td>
+                  <td>${s.nombre}</td>
+                  <td>${s.grado}° ${s.seccion}</td>
+                  <td><strong>${s.pts}</strong></td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    };
+
+    $("admin-ranking-container").innerHTML = `
+      <div class="ciclo-section">
+        <div class="ciclo-section-title">
+          <span class="badge-vi">Ciclo VI</span>
+          <h4>1ro y 2do de Secundaria</h4>
+          <span class="count-lbl">${cicloVI.length} estudiantes</span>
+        </div>
+        ${renderTablaRanking(cicloVI, "VI")}
+      </div>
+      <div class="ciclo-section">
+        <div class="ciclo-section-title">
+          <span class="badge-vii">Ciclo VII</span>
+          <h4>3ro, 4to y 5to de Secundaria</h4>
+          <span class="count-lbl">${cicloVII.length} estudiantes</span>
+        </div>
+        ${renderTablaRanking(cicloVII, "VII")}
+      </div>
+    `;
   }
 
   window.abrirPtsModal=(id,nombre)=>{
@@ -968,6 +1056,12 @@
     border:none; border-radius:7px; font-size:12px; font-weight:700;
     cursor:pointer; margin-right:4px; font-family:'Outfit',sans-serif;
   }
+  /* NUEVO: Botón para quitar puntos */
+  .btn-quitar {
+    padding:5px 12px; background: #e67e22; color:white;
+    border:none; border-radius:7px; font-size:12px; font-weight:700;
+    cursor:pointer; margin-right:4px; font-family:'Outfit',sans-serif;
+  }
   .btn-danger {
     padding:5px 12px; background: var(--crimson); color:white;
     border:none; border-radius:7px; font-size:12px; font-weight:700;
@@ -1285,6 +1379,8 @@
       <button class="admin-tab" onclick="setAdminTab('khan')">📚 Khan Academy</button>
       <button class="admin-tab" onclick="setAdminTab('premios')">🎁 Premios</button>
       <button class="admin-tab" onclick="setAdminTab('canjes')">📋 Canjes</button>
+      <!-- NUEVO: Pestaña Ranking -->
+      <button class="admin-tab" onclick="setAdminTab('ranking')">🏆 Ranking</button>
     </div>
 
     <!-- TAB: Estudiantes -->
@@ -1389,6 +1485,12 @@
         </table>
       </div>
     </div>
+
+    <!-- NUEVO: TAB Ranking Admin -->
+    <div id="admin-ranking" class="admin-panel">
+      <p class="section-title">Ranking general por ciclos</p>
+      <div id="admin-ranking-container"></div>
+    </div>
   </div>
   <div class="app-footer">IE N° 0148 MAESTRO VÍCTOR RAÚL HAYA DE LA TORRE · Panel de Administración</div>
 </div>
@@ -1424,6 +1526,28 @@
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closePtsModal()">Cancelar</button>
       <button class="btn-confirm" onclick="confirmarPts()">Agregar puntos</button>
+    </div>
+  </div>
+</div>
+
+<!-- NUEVO: MODAL QUITAR PUNTOS -->
+<div class="modal-bg" id="modalQuitarPts">
+  <div class="modal">
+    <h3>Quitar puntos</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      Estudiante: <strong id="modal-quitar-pts-user"></strong>
+    </p>
+    <div class="form-group">
+      <label>Cantidad de puntos a quitar</label>
+      <input id="modal-quitar-pts-val" type="number" min="1" placeholder="ej: 5"/>
+    </div>
+    <div class="form-group">
+      <label>Motivo</label>
+      <input id="modal-quitar-pts-motivo" type="text" placeholder="ej: Sanción, error en registro..."/>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeQuitarPtsModal()">Cancelar</button>
+      <button class="btn-confirm" onclick="confirmarQuitarPts()">Quitar puntos</button>
     </div>
   </div>
 </div>
