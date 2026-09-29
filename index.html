@@ -489,6 +489,26 @@
     adminEstudiantes();
   };
 
+  /* Guarda minutos y ejercicios para que el estudiante vea su avance, sin sumar puntos */
+  window.guardarProgresoKhan = async () => {
+    const userId=$("khan-student").value;
+    const minRaw=$("khan-minutos").value;
+    const ejRaw=$("khan-ejercicios").value;
+    if(minRaw===""&&ejRaw==="")return alert("Ingresa los minutos y/o los ejercicios aprobados.");
+    const min=parseInt(minRaw)||0;
+    const ej=parseInt(ejRaw)||0;
+    if(min<0)return alert("Los minutos no pueden ser negativos.");
+    if(ej<0||ej>4)return alert("Los ejercicios aprobados deben ser entre 0 y 4.");
+    const snap=await getDoc(doc(db,"students",userId));
+    if(!snap.exists())return alert("Estudiante no encontrado.");
+    const s=snap.data();
+    await updateDoc(doc(db,"students",userId),{khanData:{minutos:min,ejerciciosAprobados:ej}});
+    alert("✅ Progreso guardado para "+s.nombre+": "+min+" min, "+ej+"/4 ejercicios. Ya lo puede ver el estudiante.");
+    $("khan-minutos").value=$("khan-ejercicios").value="";
+    $("khan-preview").style.display="none"; khanPts=0;
+    adminEstudiantes();
+  };
+
   async function adminPremios(){
     const snap=await getDocs(collection(db,"items"));
     allItems=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.pts-b.pts);
@@ -1449,6 +1469,7 @@
         </div>
         <button class="btn-calc" onclick="calcularKhan()" style="margin-right:8px">Calcular puntos</button>
         <button class="btn-add" onclick="asignarKhan()">Asignar puntos</button>
+        <button class="btn-calc" onclick="guardarProgresoKhan()" style="margin-left:8px">Guardar solo progreso (sin puntos)</button>
       </div>
     </div>
 
